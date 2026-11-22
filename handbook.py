@@ -2,7 +2,10 @@
 import argparse
 from collections import defaultdict
 from contextlib import closing
+import fnmatch
+import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -55,29 +58,81 @@ def passages(text, default_heading):
             lines.append(line)
 
 
-def build(db, root):
+def markdown_files(root):
+    # An unreadable subtree must abort the scan, or its files would appear deleted.
+    def raise_error(error):
+        raise error
+
+    for directory, folders, names in os.walk(root, onerror=raise_error, followlinks=False):
+        folders.sort()
+        for name in sorted(fnmatch.filter(names, "*.md")):
+            path = Path(directory) / name
+            if not path.is_symlink() and path.is_file():
+                yield path
+
+
+def insert_passages(db, raw, path):
+    try:
+        source = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{path}: Markdown must be UTF-8") from exc
+    first = last = None
+    for heading, start, end, body in passages(source, Path(path).stem):
+        row = db.execute("INSERT INTO handbook_passages VALUES (?,?,?,?,?,?,?)", (
+            " ".join(tokens(heading, for_index=True)), " ".join(tokens(body, for_index=True)),
+            path, heading, start, end, body))
+        last = row.lastrowid
+        if first is None:
+            first = last
+    return first, last
+
+
+def build(db, root, *, incremental=False):
     if not root.is_dir():
         raise ValueError(f"Missing handbook directory: {root}")
-    count = 0
     with db:
         db.execute("BEGIN IMMEDIATE")
+        tables = {r[0] for r in db.execute("SELECT name FROM sqlite_schema WHERE type='table'")}
+        reuse = incremental and {"handbook_passages", "handbook_sources_v1"} <= tables
         db.execute(SCHEMA)
-        db.execute("DELETE FROM handbook_passages")
-        for path in sorted(root.rglob("*.md")):
-            if path.is_symlink() or not path.is_file():
-                continue
-            try:
-                source = path.read_text(encoding="utf-8-sig")
-            except UnicodeDecodeError as exc:
-                raise ValueError(f"{path}: Markdown must be UTF-8") from exc
-            for heading, start, end, body in passages(source, path.stem):
-                db.execute("INSERT INTO handbook_passages VALUES (?,?,?,?,?,?,?)", (
-                    " ".join(tokens(heading, for_index=True)), " ".join(tokens(body, for_index=True)),
-                    path.relative_to(root).as_posix(), heading, start, end, body))
-                count += 1
+        # The writer inserts each file's passages consecutively inside this
+        # transaction. Its rowid range lets us remove just that file from FTS5.
+        # Advance the manifest version if passage or tokenizer semantics change.
+        db.execute("""CREATE TABLE IF NOT EXISTS handbook_sources_v1 (
+            path TEXT PRIMARY KEY, digest BLOB NOT NULL, first_id INTEGER, last_id INTEGER
+        ) WITHOUT ROWID""")
+        if not reuse:
+            db.execute("DELETE FROM handbook_passages")
+            db.execute("DELETE FROM handbook_sources_v1")
+        remaining = {path: (digest, first, last) for path, digest, first, last in db.execute(
+            "SELECT path,digest,first_id,last_id FROM handbook_sources_v1")}
+        stats = {"mode": "incremental" if reuse else "bootstrap", "added": 0, "changed": 0,
+                 "removed": 0, "unchanged": 0}
+        count = 0
+        for file in markdown_files(root):
+            path = file.relative_to(root).as_posix()
+            raw = file.read_bytes()
+            digest = hashlib.sha256(raw).digest()
+            old = remaining.pop(path, None)
+            if old and digest == old[0]:
+                _, first, last = old
+                stats["unchanged"] += 1
+            else:
+                if old:
+                    db.execute("DELETE FROM handbook_passages WHERE rowid BETWEEN ? AND ?", old[1:])
+                stats["changed" if old else "added"] += 1
+                first, last = insert_passages(db, raw, path)
+                db.execute("INSERT OR REPLACE INTO handbook_sources_v1 VALUES (?,?,?,?)",
+                           (path, digest, first, last))
+            if first is not None:
+                count += last - first + 1
+        for path, (_, first, last) in remaining.items():
+            db.execute("DELETE FROM handbook_passages WHERE rowid BETWEEN ? AND ?", (first, last))
+            db.execute("DELETE FROM handbook_sources_v1 WHERE path=?", (path,))
+        stats["removed"] = len(remaining)
         if not count:
             raise ValueError("No searchable Markdown paragraphs found")
-    return {"passages": count}
+    return {"passages": count, **(stats if incremental else {})}
 
 
 def alias_units(text):
@@ -161,6 +216,7 @@ def main():
     parser.add_argument("--db", type=Path, default=Path("handbook.db"))
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("index").add_argument("directory", type=Path)
+    commands.add_parser("sync", help="update only new or changed Markdown files").add_argument("directory", type=Path)
     query = commands.add_parser("query")
     query.add_argument("text")
     query.add_argument("-k", type=int, default=3)
@@ -171,9 +227,9 @@ def main():
         command.add_argument("--glossary", type=Path, help="JSON file of directional phrase aliases")
     args = parser.parse_args()
     try:
-        if args.command == "index":
+        if args.command in ("index", "sync"):
             with closing(sqlite3.connect(args.db, timeout=15)) as db:
-                result = build(db, args.directory)
+                result = build(db, args.directory, incremental=args.command == "sync")
         else:
             glossary = load_glossary(args.glossary) if args.glossary else None
             with closing(sqlite3.connect(args.db.resolve().as_uri() + "?mode=ro", uri=True)) as db:

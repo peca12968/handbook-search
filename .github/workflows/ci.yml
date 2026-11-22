@@ -17,5 +17,6 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m unittest -v
+      - run: python sync_demo.py
       - run: python handbook.py index examples/handbook
       - run: python handbook.py eval examples/queries.json -k 3
