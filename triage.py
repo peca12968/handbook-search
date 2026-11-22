@@ -88,7 +88,11 @@ def scores(model, text):
 
 
 def candidate(model, text):
-    ranked = sorted(scores(model, text).items(), key=lambda pair: (-pair[1], pair[0]))
+    return ranked_candidate(scores(model, text))
+
+
+def ranked_candidate(values):
+    ranked = sorted(values.items(), key=lambda pair: (-pair[1], pair[0]))
     label, top = ranked[0]
     margin = round(top - ranked[1][1], 9)
     return (label if margin > 0 else None), margin
@@ -148,6 +152,10 @@ def decide(model, label, margin):
 
 def route(model, text):
     label, margin = candidate(model, text)
+    return decision_record(model, label, margin)
+
+
+def decision_record(model, label, margin):
     result = decide(model, label, margin)
     if model["format"] == 2:
         result["candidate_queue"] = label

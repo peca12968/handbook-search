@@ -4,6 +4,17 @@
 
 ## 從訓練到分派
 
+已訓練的 JSON 模型也能匯出為單一 ONNX 檔供 CPU 批次推論。工單字串先沿用原本的 Unicode 正規化與字元切分，圖內按列累計重複詞頻、套用 IDF、正規化並計算各隊列分數。詞彙順序、隊列名稱及已校正的門檻都隨模型保存。
+
+```sh
+python -m pip install --only-binary=:all: -r requirements-onnx.txt
+python triage.py fit examples/train.jsonl examples/calibration.jsonl --threshold-mode per-queue --model model.json
+python triage_onnx.py export model.json tickets.onnx
+python triage_onnx.py route tickets.onnx "包裹還沒送到" "帳號密碼忘了"
+```
+
+匯出器支援原有的共用與逐隊列門檻。演練對兩種模型各比對 41 筆輸入，包含空字串、全形字與重複文字；每筆派送或轉人工的完整結果都與 Python 版相同。本機各類分數最大絕對差約為 3.33 × 10⁻¹⁶。對每種模型另跑 123 項補齊、批次組成與順序檢查。這些數字衡量部署前後的一致性，分類品質可用下方獨立保留集查核。[跨專案驗證](onnx_drill.py) · [Batch Parity](https://github.com/peca12968/batch-parity)
+
 需要 Python 3.12 或 3.13。從專案根目錄依序執行。
 
 ```sh
