@@ -169,7 +169,13 @@ def expansion_phrases(query, glossary):
                 yield phrase
 
 
-def search(db, query, k, glossary=None):
+def validate_scope(scope):
+    if scope is not None and (not isinstance(scope, str) or "\\" in scope or "\0" in scope or
+                              any(part in ("", ".", "..") for part in scope.split("/"))):
+        raise ValueError("Scope must be a relative indexed path using / between components")
+
+
+def search(db, query, k, glossary=None, *, within=None):
     if not 1 <= k <= 50:
         raise ValueError("k must be between 1 and 50")
     words = list(dict.fromkeys(tokens(query)))
@@ -179,11 +185,14 @@ def search(db, query, k, glossary=None):
     if glossary:
         phrases.update(dict.fromkeys(expansion_phrases(query, glossary)))
     expression = " OR ".join(f'"{phrase}"' for phrase in phrases)
-    rows = db.execute("""
+    validate_scope(within)
+    scope_clause = "" if within is None else " AND (path = ? OR instr(path, ? || '/') = 1)"
+    bindings = [expression] if within is None else [expression, within, within]
+    rows = db.execute(f"""
         SELECT path, heading, start_line, end_line, passage FROM handbook_passages
-        WHERE handbook_passages MATCH ?
+        WHERE handbook_passages MATCH ? {scope_clause}
         ORDER BY bm25(handbook_passages, 3, 1), path, start_line LIMIT ?
-    """, (expression, k))
+    """, (*bindings, k))
     return [{"id": f"{path}#L{start}", "path": path, "heading": heading, "start_line": start,
              "end_line": end, "passage": body} for path, heading, start, end, body in rows]
 
@@ -192,7 +201,7 @@ def evaluate(db, dataset, k, glossary=None):
     cases = json.loads(dataset.read_text(encoding="utf-8-sig"))
     if not isinstance(cases, list) or not cases:
         raise ValueError("Expected a nonempty list of evaluation cases")
-    known = {f"{path}#L{line}" for path, line in db.execute("SELECT path,start_line FROM handbook_passages")}
+    known = {f"{path}#L{line}": path for path, line in db.execute("SELECT path,start_line FROM handbook_passages")}
     details = []
     for index, case in enumerate(cases, 1):
         if not isinstance(case, dict) or not isinstance(case.get("query"), str):
@@ -201,12 +210,18 @@ def evaluate(db, dataset, k, glossary=None):
         if not isinstance(labels, list) or not labels or not all(isinstance(item, str) for item in labels):
             raise ValueError(f"Case {index}: expected a nonempty list of relevant passage IDs")
         relevant = set(labels)
-        if relevant - known:
-            raise ValueError(f"Case {index}: missing labeled passage {sorted(relevant - known)}")
-        ids = [row["id"] for row in search(db, case["query"], k, glossary)]
+        if missing := relevant - known.keys():
+            raise ValueError(f"Case {index}: missing labeled passage {sorted(missing)}")
+        scope = case.get("within")
+        validate_scope(scope)
+        if scope is not None and any(known[label] != scope and not known[label].startswith(scope + "/") for label in relevant):
+            raise ValueError(f"Case {index}: relevant passage outside requested scope")
+        ids = [row["id"] for row in search(db, case["query"], k, glossary, within=scope)]
         ranks = [rank for rank, key in enumerate(ids, 1) if key in relevant]
         details.append({"query": case["query"], "retrieved": ids, "recall": len(ranks) / len(relevant),
                         "reciprocal_rank": 1 / ranks[0] if ranks else 0})
+        if scope is not None:
+            details[-1]["within"] = scope
     return {"k": k, "queries": len(cases), "mean_recall": sum(x["recall"] for x in details) / len(cases),
             "mrr": sum(x["reciprocal_rank"] for x in details) / len(cases), "details": details}
 
@@ -220,6 +235,7 @@ def main():
     query = commands.add_parser("query")
     query.add_argument("text")
     query.add_argument("-k", type=int, default=3)
+    query.add_argument("--within", help="Restrict retrieval to an indexed file or directory")
     evaluation = commands.add_parser("eval")
     evaluation.add_argument("dataset", type=Path)
     evaluation.add_argument("-k", type=int, default=3)
@@ -235,7 +251,7 @@ def main():
             with closing(sqlite3.connect(args.db.resolve().as_uri() + "?mode=ro", uri=True)) as db:
                 with db:
                     db.execute("BEGIN")
-                    result = (search(db, args.text, args.k, glossary) if args.command == "query"
+                    result = (search(db, args.text, args.k, glossary, within=args.within) if args.command == "query"
                               else evaluate(db, args.dataset, args.k, glossary))
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0

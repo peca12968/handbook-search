@@ -20,3 +20,14 @@ jobs:
       - run: python sync_demo.py
       - run: python handbook.py index examples/handbook
       - run: python handbook.py eval examples/queries.json -k 3
+      - uses: actions/checkout@v4
+        if: matrix.python == '3.12'
+        with:
+          repository: peca12968/vector-sieve
+          ref: 68ba4b7d07522cf2a0c8cccd8da080ec52aedc59
+          path: vector-checkout
+          persist-credentials: false
+      - if: matrix.python == '3.12'
+        run: "python -m pip install --only-binary=:all: -r vector-checkout/requirements.txt"
+      - if: matrix.python == '3.12'
+        run: python scope_demo.py vector-checkout/sieve.py

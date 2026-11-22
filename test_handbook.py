@@ -126,6 +126,29 @@ class RetrievalTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing labeled passage"):
             evaluate(self.db, cases, 2)
 
+    def test_scope_is_literal_and_applied_before_limit_and_metrics(self):
+        for folder in ("docs", "docs-old", "docs_100%", "docsX100X"):
+            (self.corpus / folder).mkdir()
+            self.put(f"{folder}/a.md", "# Guide\nparcel\n")
+        build(self.db, self.corpus)
+        target = "docs_100%/a.md#L2"
+        self.assertNotEqual(search(self.db, "parcel", 1)[0]["id"], target)
+        self.assertEqual([r["id"] for r in search(self.db, "parcel", 4, within="docs")], ["docs/a.md#L2"])
+        self.assertEqual(search(self.db, "parcel", 1, within="docs_100%")[0]["id"], target)
+        self.assertEqual(search(self.db, "parcel", 3, within="absent"), [])
+        for invalid in ("", "../docs", "docs/", "/docs", "docs//file"):
+            with self.assertRaisesRegex(ValueError, "Scope"):
+                search(self.db, "parcel", 1, within=invalid)
+        cases = self.root / "scoped.json"
+        case = {"query": "parcel", "within": "docs_100%", "relevant": [target]}
+        cases.write_text(json.dumps([case]))
+        report = evaluate(self.db, cases, 1)
+        self.assertEqual(report["details"][0]["within"], case["within"])
+        self.assertEqual(report["mean_recall"], 1)
+        cases.write_text(json.dumps([{**case, "within": "docs-old"}]))
+        with self.assertRaisesRegex(ValueError, "outside requested scope"):
+            evaluate(self.db, cases, 1)
+
     def test_cli_round_trip_and_quality_gate(self):
         def run(*args):
             return subprocess.run([sys.executable, str(ROOT / "handbook.py"), "--db",
@@ -137,6 +160,8 @@ class RetrievalTests(unittest.TestCase):
         self.assertEqual(indexed.returncode, 0, indexed.stderr)
         self.assertEqual(json.loads(indexed.stdout)["passages"], 11)
         self.assertEqual(json.loads(run("query", "付款重送").stdout)[0]["id"], "checkout.md#L7")
+        scope = run("query", "付款重送 payment retry", "-k", "1", "--within", "pipeline.md")
+        self.assertEqual(json.loads(scope.stdout)[0]["id"], "pipeline.md#L10")
         report = json.loads(run("eval", ROOT / "examples/queries.json", "-k", "3").stdout)
         self.assertEqual(report["queries"], 13)
         self.assertGreaterEqual(report["mean_recall"], 0.90)
