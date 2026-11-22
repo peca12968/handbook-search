@@ -7,7 +7,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from handbook import build, evaluate, passages, search
+from handbook import build, evaluate, load_glossary, passages, search
 
 ROOT = Path(__file__).resolve().parent
 
@@ -57,6 +57,44 @@ class RetrievalTests(unittest.TestCase):
         self.assertEqual(build(self.db, self.corpus), {"passages": 1})
         self.assertEqual(search(self.db, "oldterm", 3), [])
 
+    def test_glossary_matches_whole_words_and_expands_a_literal_phrase_once(self):
+        self.put("match.md", "# Deploy\nrelease rollback\n")
+        self.put("partial.md", "# Deploy\nrelease requires a rollback\n")
+        self.put("chain.md", "# Deploy\nsecondary\n")
+        build(self.db, self.corpus)
+        path = self.root / "rules.json"
+        path.write_text(json.dumps([{"from": "Roll Back", "to": "release rollback"},
+                                    {"from": "release rollback", "to": "secondary"}]), encoding="utf-8")
+        glossary = load_glossary(path)
+        hits = search(self.db, "ＲＯＬＬ back", 5, glossary)
+        self.assertEqual([hit["path"] for hit in hits], ["match.md"])
+        self.assertEqual(search(self.db, "enroll backing", 5, glossary), [])
+
+    def test_invalid_glossary_reports_rule_number(self):
+        path = self.root / "rules.json"
+        for rules, message in [
+            ([], "nonempty"),
+            ([{"from": "alias"}], "rule 1"),
+            ([{"from": "!!", "to": "word"}], "rule 1"),
+            ([{"from": "Ａ", "to": "first"}, {"from": "a", "to": "second"}], "rule 2"),
+        ]:
+            with self.subTest(rules=rules):
+                path.write_text(json.dumps(rules), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, message):
+                    load_glossary(path)
+
+    def test_example_glossary_handles_other_queries_in_both_directions(self):
+        build(self.db, ROOT / "examples/handbook")
+        glossary = load_glossary(ROOT / "examples/glossary.json")
+        for query, expected in [
+            ("如何設定工作租約", "operations.md#L7"),
+            ("版本回退", "operations.md#L13"),
+            ("資料檢查點", "pipeline.md#L13"),
+            ("restore drill", "operations.md#L10"),
+        ]:
+            with self.subTest(query=query):
+                self.assertEqual(search(self.db, query, 3, glossary)[0]["id"], expected)
+
     def test_invalid_file_or_empty_corpus_leaves_last_good_index(self):
         old = self.put("a.md", "# Guide\npreviousversion\n")
         build(self.db, self.corpus)
@@ -103,6 +141,20 @@ class RetrievalTests(unittest.TestCase):
         self.assertEqual(report["queries"], 13)
         self.assertGreaterEqual(report["mean_recall"], 0.90)
         self.assertGreaterEqual(report["mrr"], 0.90)
+        glossary_args = ["--glossary", ROOT / "examples/glossary.json"]
+        improved = json.loads(run("eval", ROOT / "examples/queries.json", *glossary_args).stdout)
+        for before, after in zip(report["details"], improved["details"], strict=True):
+            with self.subTest(query=before["query"]):
+                self.assertEqual(after["query"], before["query"])
+                if before["query"] == "背景執行者當機由誰接手":
+                    self.assertEqual(before["recall"], 0)
+                    self.assertEqual(after["retrieved"][0], "operations.md#L7")
+                else:
+                    self.assertEqual(after["retrieved"], before["retrieved"])
+        self.assertEqual((improved["mean_recall"], improved["mrr"]), (1, 1))
+        hit = json.loads(run("query", "背景執行者當機由誰接手", *glossary_args).stdout)[0]
+        self.assertEqual(hit["id"], "operations.md#L7")
+        self.assertIn("When its lease expires", hit["passage"])
         for args in [("query", "..."), ("query", "term", "-k", "0")]:
             failed = run(*args)
             self.assertEqual(failed.returncode, 2)

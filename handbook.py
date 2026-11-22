@@ -1,5 +1,6 @@
 """Index, search and evaluate a local Markdown handbook."""
 import argparse
+from collections import defaultdict
 from contextlib import closing
 import json
 from pathlib import Path
@@ -79,13 +80,50 @@ def build(db, root):
     return {"passages": count}
 
 
-def search(db, query, k):
+def alias_units(text):
+    """Match Han characters inside unspaced text and other words as whole units."""
+    for index, chunk in enumerate(HAN.split(unicodedata.normalize("NFKC", text).casefold())):
+        yield from (chunk if index % 2 else WORD.findall(chunk))
+
+
+def load_glossary(path):
+    rules = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(rules, list) or not rules:
+        raise ValueError("Expected a nonempty list of glossary rules")
+    by_length = defaultdict(dict)
+    for index, rule in enumerate(rules, 1):
+        if not isinstance(rule, dict) or not all(isinstance(rule.get(key), str) for key in ("from", "to")):
+            raise ValueError(f"Glossary rule {index}: expected 'from' and 'to' strings")
+        source = tuple(alias_units(rule["from"]))
+        target = " ".join(tokens(rule["to"]))
+        if not source or not target:
+            raise ValueError(f"Glossary rule {index}: empty source or target after tokenization")
+        bucket = by_length[len(source)]
+        if source in bucket:
+            raise ValueError(f"Glossary rule {index}: duplicate normalized source")
+        bucket[source] = target
+    return dict(by_length)
+
+
+def expansion_phrases(query, glossary):
+    units = tuple(alias_units(query))
+    for size, rules in glossary.items():
+        for start in range(len(units) - size + 1):
+            phrase = rules.get(units[start:start + size])
+            if phrase:
+                yield phrase
+
+
+def search(db, query, k, glossary=None):
     if not 1 <= k <= 50:
         raise ValueError("k must be between 1 and 50")
     words = list(dict.fromkeys(tokens(query)))
     if not 1 <= len(words) <= 64:
         raise ValueError("Expected 1 to 64 distinct search terms")
-    expression = " OR ".join(f'"{word}"' for word in words)
+    phrases = dict.fromkeys(words)
+    if glossary:
+        phrases.update(dict.fromkeys(expansion_phrases(query, glossary)))
+    expression = " OR ".join(f'"{phrase}"' for phrase in phrases)
     rows = db.execute("""
         SELECT path, heading, start_line, end_line, passage FROM handbook_passages
         WHERE handbook_passages MATCH ?
@@ -95,7 +133,7 @@ def search(db, query, k):
              "end_line": end, "passage": body} for path, heading, start, end, body in rows]
 
 
-def evaluate(db, dataset, k):
+def evaluate(db, dataset, k, glossary=None):
     cases = json.loads(dataset.read_text(encoding="utf-8-sig"))
     if not isinstance(cases, list) or not cases:
         raise ValueError("Expected a nonempty list of evaluation cases")
@@ -110,7 +148,7 @@ def evaluate(db, dataset, k):
         relevant = set(labels)
         if relevant - known:
             raise ValueError(f"Case {index}: missing labeled passage {sorted(relevant - known)}")
-        ids = [row["id"] for row in search(db, case["query"], k)]
+        ids = [row["id"] for row in search(db, case["query"], k, glossary)]
         ranks = [rank for rank, key in enumerate(ids, 1) if key in relevant]
         details.append({"query": case["query"], "retrieved": ids, "recall": len(ranks) / len(relevant),
                         "reciprocal_rank": 1 / ranks[0] if ranks else 0})
@@ -129,17 +167,20 @@ def main():
     evaluation = commands.add_parser("eval")
     evaluation.add_argument("dataset", type=Path)
     evaluation.add_argument("-k", type=int, default=3)
+    for command in (query, evaluation):
+        command.add_argument("--glossary", type=Path, help="JSON file of directional phrase aliases")
     args = parser.parse_args()
     try:
         if args.command == "index":
             with closing(sqlite3.connect(args.db, timeout=15)) as db:
                 result = build(db, args.directory)
         else:
+            glossary = load_glossary(args.glossary) if args.glossary else None
             with closing(sqlite3.connect(args.db.resolve().as_uri() + "?mode=ro", uri=True)) as db:
                 with db:
                     db.execute("BEGIN")
-                    result = (search(db, args.text, args.k) if args.command == "query"
-                              else evaluate(db, args.dataset, args.k))
+                    result = (search(db, args.text, args.k, glossary) if args.command == "query"
+                              else evaluate(db, args.dataset, args.k, glossary))
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (OSError, sqlite3.Error, ValueError) as exc:

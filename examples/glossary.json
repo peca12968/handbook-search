@@ -1,0 +1,7 @@
+[
+  {"from": "背景執行者", "to": "worker"},
+  {"from": "工作租約", "to": "worker lease"},
+  {"from": "版本回退", "to": "release rollback"},
+  {"from": "資料檢查點", "to": "pipeline checkpoints"},
+  {"from": "restore drill", "to": "還原演練"}
+]
