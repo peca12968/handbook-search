@@ -68,6 +68,80 @@ class RoutingTests(unittest.TestCase):
             for label, center in zip(labels, centers):
                 self.assertAlmostEqual(actual[label], (q @ center)[0], places=12)
 
+    def test_per_queue_evidence_routing_and_frozen_holdout(self):
+        fit = self.cli("fit", EXAMPLES / "train.jsonl", EXAMPLES / "calibration.jsonl",
+                       "--threshold-mode", "per-queue", "--min-calibration-cases", "3")
+        policies = fit["queue_policies"]
+        self.assertEqual(policies["付款"]["status"], "enabled")
+        for label in ("帳號", "配送"):
+            policy = policies[label]
+            self.assertEqual((policy["status"], policy["threshold"]), ("precision_target_unmet", None))
+            self.assertEqual((policy["best_supported"]["correct"], policy["best_supported"]["accepted"]), (2, 3))
+        before = self.model.read_bytes()
+        holdout = self.cli("evaluate", EXAMPLES / "holdout.jsonl")
+        self.assertEqual((holdout["assigned"], holdout["correct_assignments"], holdout["review"]), (1, 1, 10))
+        stats = holdout["by_candidate_queue"]
+        self.assertEqual((stats["付款"]["candidates"], stats["付款"]["assigned"]), (2, 1))
+        self.assertEqual((stats["帳號"]["review"], stats["配送"]["review"], holdout["no_unique_candidate"]), (4, 3, 2))
+        self.assertIsNone(stats["帳號"]["assignment_precision"])
+        for row in holdout["details"]:
+            if row["candidate_queue"] is not None:
+                self.assertEqual(row["margin_threshold"], policies[row["candidate_queue"]]["threshold"])
+        account = self.cli("route", "無法登入帳號，重設密碼連結過期")
+        self.assertEqual((account["candidate_queue"], account["queue"], account["reason"]),
+                         ("帳號", None, "no_validated_threshold"))
+        self.assertEqual(self.cli("route", "🐙")["reason"], "no_unique_match")
+        self.cli("evaluate", EXAMPLES / "calibration.jsonl", success=False)
+        self.assertEqual(self.model.read_bytes(), before)
+
+    def test_class_local_support_prevents_borrowing_another_queues_examples(self):
+        train = triage.read_cases(EXAMPLES / "train.jsonl")
+        at = triage.timestamp("2025-02-15T00:00Z")
+        calibration = {str(i): (at, "信用卡扣款失敗", "付款") for i in range(4)}
+        calibration["minority"] = (at, "無法登入帳號，重設密碼連結過期", "帳號")
+        model = triage.fit(train, calibration, Fraction(1), threshold_mode="per-queue", min_cases=2)
+        account = model["queue_policies"]["帳號"]
+        self.assertEqual(account, {"threshold": None, "status": "insufficient_candidates",
+                                   "candidates": 1, "best_supported": None})
+        self.assertEqual(model["queue_policies"]["配送"]["candidates"], 0)
+        self.assertEqual(triage.route(model, calibration["minority"][1])["action"], "review")
+        self.assertEqual(triage.route(model, "信用卡扣款失敗")["action"], "assign")
+
+    def test_minimum_support_and_peak_precision_against_exhaustive_thresholds(self):
+        rng = random.Random(921)
+        for _ in range(300):
+            observations = [(rng.randrange(1, 11) / 10, rng.choice([False, True]))
+                            for _ in range(rng.randrange(26))]
+            target, support = Fraction(rng.randint(1, 5), 5), rng.randint(1, 8)
+            eligible = []
+            for threshold in {margin for margin, _ in observations}:
+                hits = [hit for margin, hit in observations if margin >= threshold]
+                if len(hits) >= support:
+                    eligible.append((Fraction(sum(hits), len(hits)), len(hits), threshold, sum(hits)))
+            policy = triage.calibrate(observations, target, support)
+            self.assertEqual(policy["candidates"], len(observations))
+            qualifying = [(n, threshold) for precision, n, threshold, _ in eligible if precision >= target]
+            self.assertEqual(policy["threshold"], max(qualifying)[1] if qualifying else None)
+            if eligible:
+                _, n, threshold, hits = max(eligible)
+                self.assertEqual(policy["best_supported"], {"margin": threshold, "correct": hits, "accepted": n})
+            else:
+                self.assertIsNone(policy["best_supported"])
+
+    def test_legacy_model_and_malformed_policy_cli(self):
+        self.train()
+        legacy = json.loads(self.model.read_bytes())
+        del legacy["minimum_calibration_cases"]
+        self.model.write_text(json.dumps(legacy), encoding="utf-8")
+        self.assertEqual(self.cli("evaluate", EXAMPLES / "holdout.jsonl")["assigned"], 4)
+        original = self.model.read_bytes()
+        for value in ["0", "-1"]:
+            self.cli("fit", EXAMPLES / "train.jsonl", EXAMPLES / "calibration.jsonl",
+                     "--threshold-mode", "per-queue", "--min-calibration-cases", value, success=False)
+        self.assertEqual(self.model.read_bytes(), original)
+        self.model.write_text(json.dumps(legacy | {"format": 2, "queue_policies": {}}), encoding="utf-8")
+        self.cli("route", "付款", success=False)
+
     def test_threshold_matches_exhaustive_search_with_ties_and_nonmonotone_precision(self):
         rng = random.Random(3187)
         for _ in range(250):

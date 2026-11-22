@@ -94,23 +94,46 @@ def candidate(model, text):
     return (label if margin > 0 else None), margin
 
 
-def choose_threshold(observations, target):
+def calibrate(observations, target, min_cases):
     # Every member of a tied margin group is accepted or rejected together.
-    best = None
+    threshold = None
+    peak = None
+    peak_precision = None
     correct = accepted = 0
     for margin, group in groupby(sorted(observations, reverse=True), key=lambda pair: pair[0]):
         for _, hit in group:
             correct += hit
             accepted += 1
-        if Fraction(correct, accepted) >= target:
-            best = margin
-    return best
+        if accepted < min_cases:
+            continue
+        precision = Fraction(correct, accepted)
+        if peak_precision is None or precision >= peak_precision:
+            peak_precision = precision
+            peak = {"margin": margin, "correct": correct, "accepted": accepted}
+        if precision >= target:
+            threshold = margin
+    if threshold is not None:
+        status = "enabled"
+    elif accepted < min_cases:
+        status = "insufficient_candidates"
+    else:
+        status = "precision_target_unmet"
+    return {"threshold": threshold, "status": status, "candidates": accepted, "best_supported": peak}
 
 
-def route(model, text):
-    label, margin = candidate(model, text)
-    threshold = model["margin_threshold"]
-    if threshold is None:
+def choose_threshold(observations, target, min_cases=1):
+    return calibrate(observations, target, min_cases)["threshold"]
+
+
+def threshold_for(model, label):
+    if model["format"] == 1:
+        return model["margin_threshold"]
+    return model["queue_policies"][label]["threshold"] if label is not None else None
+
+
+def decide(model, label, margin):
+    threshold = threshold_for(model, label)
+    if threshold is None and (label is not None or model["format"] == 1):
         reason = "no_validated_threshold"
     elif label is None:
         reason = "no_unique_match"
@@ -123,33 +146,82 @@ def route(model, text):
             "reason": reason, "margin": margin, "margin_threshold": threshold}
 
 
+def route(model, text):
+    label, margin = candidate(model, text)
+    result = decide(model, label, margin)
+    if model["format"] == 2:
+        result["candidate_queue"] = label
+    return result
+
+
 def measure(model, cases):
     details = []
     correct = assigned = 0
+    no_candidate = 0
+    queues = {label: {"margin_threshold": threshold_for(model, label), "candidates": 0,
+                      "assigned": 0, "review": 0, "correct_assignments": 0}
+              for label in sorted(model["centers"])}
     for case, (_, text, truth) in sorted(cases.items()):
-        result = route(model, text)
+        label, margin = candidate(model, text)
+        result = decide(model, label, margin)
+        if label is None:
+            no_candidate += 1
+        else:
+            queues[label]["candidates"] += 1
         if result["action"] == "assign":
             assigned += 1
-            correct += result["queue"] == truth
-        details.append({"case_id": case, "expected": truth, **result})
+            hit = label == truth
+            correct += hit
+            queues[label]["assigned"] += 1
+            queues[label]["correct_assignments"] += hit
+        elif label is not None:
+            queues[label]["review"] += 1
+        details.append({"case_id": case, "expected": truth, "candidate_queue": label, **result})
+    for stats in queues.values():
+        stats["assignment_precision"] = stats["correct_assignments"] / stats["assigned"] if stats["assigned"] else None
     return {"cases": len(cases), "assigned": assigned, "review": len(cases) - assigned,
             "correct_assignments": correct, "coverage": assigned / len(cases),
-            "assignment_precision": correct / assigned if assigned else None, "details": details}
+            "assignment_precision": correct / assigned if assigned else None,
+            "by_candidate_queue": queues, "no_unique_candidate": no_candidate, "details": details}
 
 
-def fit(train, calibration, target):
+def fit(train, calibration, target, *, threshold_mode="global", min_cases=1):
     if not 0 < target <= 1:
         raise ValueError("minimum precision must be greater than zero and at most one")
+    if threshold_mode not in ("global", "per-queue") or type(min_cases) is not int or min_cases < 1:
+        raise ValueError("expected global or per-queue calibration and a positive minimum case count")
     require_later(calibration, train, max(row[0] for row in train.values()))
     model = learn(train)
-    observations = []
+    observations = defaultdict(list)
     for _, text, truth in calibration.values():
         label, margin = candidate(model, text)
         if label is not None:
-            observations.append((margin, label == truth))
-    model.update(format=1, minimum_precision=str(target), margin_threshold=choose_threshold(observations, target),
+            observations[label].append((margin, label == truth))
+    if threshold_mode == "global":
+        pooled = [item for group in observations.values() for item in group]
+        model.update(format=1, margin_threshold=choose_threshold(pooled, target, min_cases))
+    else:
+        model.update(format=2, queue_policies={
+            label: calibrate(observations[label], target, min_cases) for label in sorted(model["centers"])})
+    model.update(minimum_precision=str(target), minimum_calibration_cases=min_cases,
                  used_ids=sorted(set(train) | set(calibration)),
                  used_through=max(row[0] for row in calibration.values()).isoformat())
+    return model
+
+
+def load_model(path):
+    model = json.loads(path.read_text(encoding="utf-8"))
+    if model["format"] == 1:
+        thresholds = [model["margin_threshold"]]
+    elif model["format"] == 2:
+        policy = model["queue_policies"]
+        if not isinstance(policy, dict) or not isinstance(model["centers"], dict) or policy.keys() != model["centers"].keys():
+            raise ValueError("queue thresholds must cover exactly the trained queues")
+        thresholds = [row["threshold"] for row in policy.values()]
+    else:
+        raise ValueError("unknown model format")
+    if any(v is not None and (type(v) not in (int, float) or not 0 < v <= 1) for v in thresholds):
+        raise ValueError("invalid margin threshold")
     return model
 
 
@@ -171,6 +243,9 @@ def main():
     build.add_argument("train", type=Path)
     build.add_argument("calibration", type=Path)
     build.add_argument("--min-precision", default="0.9")
+    build.add_argument("--threshold-mode", choices=["global", "per-queue"], default="global")
+    build.add_argument("--min-calibration-cases", type=int, default=1,
+                       help="minimum number of accepted calibration predictions per threshold")
     build.add_argument("--model", type=Path, required=True)
     predict = commands.add_parser("route")
     predict.add_argument("text")
@@ -184,13 +259,13 @@ def main():
             if args.model.resolve() in {args.train.resolve(), args.calibration.resolve()}:
                 raise ValueError("model output also names a dataset")
             train, calibration = read_cases(args.train), read_cases(args.calibration)
-            model = fit(train, calibration, Fraction(args.min_precision))
-            report = {"margin_threshold": model["margin_threshold"], "calibration": measure(model, calibration)}
+            model = fit(train, calibration, Fraction(args.min_precision),
+                        threshold_mode=args.threshold_mode, min_cases=args.min_calibration_cases)
+            policy = "margin_threshold" if model["format"] == 1 else "queue_policies"
+            report = {policy: model[policy], "calibration": measure(model, calibration)}
             write_model(args.model, model)
         else:
-            model = json.loads(args.model.read_text(encoding="utf-8"))
-            if model["format"] != 1:
-                raise ValueError("unknown model format")
+            model = load_model(args.model)
             if args.command == "route":
                 report = route(model, args.text)
             else:
