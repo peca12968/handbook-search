@@ -1,0 +1,15 @@
+[
+  {"query":"保留到期怎麼歸還庫存", "relevant":["checkout.md#L4"]},
+  {"query":"付款逾時重送", "relevant":["checkout.md#L7"]},
+  {"query":"same request key after payment timeout", "relevant":["pipeline.md#L10"]},
+  {"query":"worker crash lease", "relevant":["operations.md#L7"]},
+  {"query":"還原備份怎麼驗證", "relevant":["operations.md#L10"]},
+  {"query":"rollback release error budget", "relevant":["operations.md#L13"]},
+  {"query":"data ingestion checkpoint", "relevant":["pipeline.md#L13"]},
+  {"query":"missing dates zero requests", "relevant":["pipeline.md#L7"]},
+  {"query":"refunds settlement currency", "relevant":["checkout.md#L10"]},
+  {"query":"付款重送 payment retry", "relevant":["checkout.md#L7","pipeline.md#L10"]},
+  {"query":"批次資料去重", "relevant":["pipeline.md#L4"]},
+  {"query":"錯誤預算可用率", "relevant":["operations.md#L4"]},
+  {"query":"背景執行者當機由誰接手", "relevant":["operations.md#L7"]}
+]
