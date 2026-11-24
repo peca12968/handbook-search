@@ -13,7 +13,7 @@ python triage_onnx.py export model.json tickets.onnx
 python triage_onnx.py route tickets.onnx "包裹還沒送到" "帳號密碼忘了"
 ```
 
-匯出器支援原有的共用與逐隊列門檻。演練對兩種模型各比對 41 筆輸入，包含空字串、全形字與重複文字；每筆派送或轉人工的完整結果都與 Python 版相同。本機各類分數最大絕對差約為 3.33 × 10⁻¹⁶。對每種模型另跑 123 項補齊、批次組成與順序檢查。這些數字衡量部署前後的一致性，分類品質可用下方獨立保留集查核。[跨專案驗證](onnx_drill.py) · [Batch Parity](https://github.com/peca12968/batch-parity)
+匯出器支援原有的共用與逐隊列門檻。演練對兩種模型各比對 41 筆輸入，包含空字串、全形字與重複文字；每筆派送或轉人工的完整結果都與 Python 版相同。本機各類分數最大絕對差約為 3.33 × 10⁻¹⁶。對每種模型另跑 123 項補齊、批次組成與順序檢查。這些數字衡量部署前後的一致性，分類品質可用下方獨立保留集查核。[跨專案驗證](onnx_drill.py) · [Batch Parity](https://github.com/peca12968/ticket-triage/tree/main/modules/batch-parity)
 
 需要 Python 3.12 或 3.13。從專案根目錄依序執行。
 
@@ -80,8 +80,10 @@ python -m pip install -r requirements-test.txt
 python -m unittest -v
 ```
 
-九項測試涵蓋 CLI 端到端分派、保留集評估、舊版模型、跨期資料檢查、平手及全人工狀態。數值測試使用 scikit-learn 的字元 TF-IDF 獨立計算 21 件校正與保留案例對三個隊列的分數，以 250 組固定種子樣本窮舉核對門檻選擇，再以 300 組含最低件數限制的樣本核對門檻及最佳可達精確率。[測試](test_triage.py) · [CI](.github/workflows/ci.yml)
+九項測試涵蓋 CLI 端到端分派、保留集評估、舊版模型、跨期資料檢查、平手及全人工狀態。數值測試使用 scikit-learn 的字元 TF-IDF 獨立計算 21 件校正與保留案例對三個隊列的分數，以 250 組固定種子樣本窮舉核對門檻選擇，再以 300 組含最低件數限制的樣本核對門檻及最佳可達精確率。[測試](test_triage.py) · [CI](.github/workflows/system.yml)
 
 **履歷用語**　以 Python 實作中文客服工單分流，逐隊列校正自動分派門檻，用下一期工單量測分派精確率與人工覆核量，並以 scikit-learn 及窮舉搜尋交叉驗證分數與門檻。
 
 本專案使用 AI 輔助開發，所有工單皆為合成資料。
+
+[同庫模組與整合測試](modules/README.md)
