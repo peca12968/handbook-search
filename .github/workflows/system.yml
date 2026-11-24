@@ -54,3 +54,56 @@ jobs:
     defaults:
       run:
         working-directory: modules/vector-sieve
+  ticket-triage-verify:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+        - ubuntu-latest
+        - windows-latest
+        python:
+        - '3.12'
+        - '3.13'
+    env:
+      PYTHONUTF8: '1'
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: ${{ matrix.python }}
+    - run: python -m pip install -r requirements-test.txt
+    - run: python -m unittest -v
+    - run: python triage.py fit examples/train.jsonl examples/calibration.jsonl --model model.json
+    - run: python triage.py evaluate examples/holdout.jsonl --model model.json
+    - run: python compare_policies.py
+    - uses: actions/checkout@v7
+      if: matrix.python == '3.12'
+      with:
+        ref: aaa6b948af2da875946f9a96a12731e10c5f774b
+        path: modules/ticket-triage/parity-checkout
+        persist-credentials: false
+    - if: matrix.python == '3.12'
+      run: 'python -m pip install --only-binary=:all: -r requirements-onnx.txt'
+    - if: matrix.python == '3.12'
+      run: python onnx_drill.py parity-checkout/check.py
+    defaults:
+      run:
+        working-directory: modules/ticket-triage
+  ticket-triage-batch-parity-inference:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+        - ubuntu-latest
+        - windows-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - run: 'python -m pip install --only-binary=:all: -r requirements.txt'
+    - run: python -m unittest -v
+    - run: python model_demo.py
+    defaults:
+      run:
+        working-directory: modules/ticket-triage/modules/batch-parity

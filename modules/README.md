@@ -5,5 +5,6 @@
 ## 同庫模組
 
 - [vector-sieve](vector-sieve/README.md)
+- [ticket-triage](ticket-triage/README.md)
 
 [整合驗證](../.github/workflows/system.yml)
