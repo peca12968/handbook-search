@@ -48,6 +48,21 @@ python verified_demo.py
 
 範例在建立索引後改寫第 1 名原文，並把第 2 名的段落從第 2 行移到第 6 行。上限為 2 時只返回 1 筆，`stopped` 為 `scan_limit`。掃描到第 3 名可補足 2 筆，`stopped` 為 `filled`。候選用完仍未補足時回報 `exhausted`，沒有可核對的引用時可回傳空清單。[重跑程式](verified_demo.py) · [實際命令輸出](examples/verified-search-demo.json)
 
+### 追蹤改名後的手冊引用
+
+重整手冊目錄後，可對舊索引使用 `--follow-renames`，核對原本的引用是否仍可使用。
+
+```sh
+python handbook.py query "付款重送" -k 1 --verify-sources examples/handbook --follow-renames --verified-only
+python rename_demo.py
+```
+
+原檔找不到時，工具使用索引記錄的完整檔案 SHA-256 尋找內容完全相同的 Markdown。只有一份符合時，核對狀態為 `renamed`，`citation.path` 和 `citation.id` 提供現行路徑與行號。原索引的 `id` 及排名保留，便於追查引用。在 `--verified-only` 模式，若兩筆舊引用指向同一個現行位置，只會列一次。
+
+重跑範例可看到 `ops/checkout.md#L3` 改指向 `ops/payment-retry.md#L3`。加入內容相同的 `ops-old/copy.md` 後，全域查詢會回報兩個候選。加 `--within ops` 同時限制索引命中與現行路徑，因而仍可確認 `ops` 內的引用。原路徑核對及查詢排名仍可在同一份索引重現。
+
+改名核對只在遇到有檔案雜湊的遺失引用時掃描指定範圍，每次查詢掃描至多一次。複本並列、搬動同時修改內容、或無法完成掃描時，會保留對應的未確認狀態。舊索引缺少檔案雜湊時可沿用原路徑核對，下一次 `sync` 會補上文件清單。[實際命令輸出](examples/renamed-citation-demo.json) · [路徑、舊索引及掃描失敗測試](test_renames.py)
+
 ## 工單模型上線前的比較關卡
 
 在同一批獨立評估工單上逐筆比較現行與候選模型，檢查精確率、新增誤派、總覆核量以及各隊列的覆核量。報告列出改變的工單 ID、評估期間與三份輸入的 SHA-256，供 CI 和發布紀錄引用。[重跑步驟](modules/ticket-triage/README.md#在-ci-檢查工單模型是否可替換) · [端對端測試](modules/ticket-triage/test_release_gate.py)

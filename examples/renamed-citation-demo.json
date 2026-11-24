@@ -1,0 +1,96 @@
+{
+  "query": "付款重送",
+  "original": {
+    "id": "ops/checkout.md#L3",
+    "path": "ops/checkout.md",
+    "heading": "付款",
+    "start_line": 3,
+    "end_line": 3,
+    "passage": "付款重送時使用同一個冪等鍵。",
+    "source_check": {
+      "status": "missing",
+      "locations": [],
+      "matches": 0
+    }
+  },
+  "followed": {
+    "id": "ops/checkout.md#L3",
+    "path": "ops/checkout.md",
+    "heading": "付款",
+    "start_line": 3,
+    "end_line": 3,
+    "passage": "付款重送時使用同一個冪等鍵。",
+    "source_check": {
+      "status": "renamed",
+      "matches": 1,
+      "locations": [
+        {
+          "id": "ops/payment-retry.md#L3",
+          "path": "ops/payment-retry.md",
+          "start_line": 3,
+          "end_line": 3
+        }
+      ]
+    },
+    "rank": 1,
+    "citation": {
+      "id": "ops/payment-retry.md#L3",
+      "path": "ops/payment-retry.md",
+      "start_line": 3,
+      "end_line": 3
+    }
+  },
+  "ambiguous": {
+    "id": "ops/checkout.md#L3",
+    "path": "ops/checkout.md",
+    "heading": "付款",
+    "start_line": 3,
+    "end_line": 3,
+    "passage": "付款重送時使用同一個冪等鍵。",
+    "source_check": {
+      "status": "ambiguous",
+      "matches": 2,
+      "locations": [
+        {
+          "id": "ops-old/copy.md#L3",
+          "path": "ops-old/copy.md",
+          "start_line": 3,
+          "end_line": 3
+        },
+        {
+          "id": "ops/payment-retry.md#L3",
+          "path": "ops/payment-retry.md",
+          "start_line": 3,
+          "end_line": 3
+        }
+      ]
+    }
+  },
+  "scoped": {
+    "id": "ops/checkout.md#L3",
+    "path": "ops/checkout.md",
+    "heading": "付款",
+    "start_line": 3,
+    "end_line": 3,
+    "passage": "付款重送時使用同一個冪等鍵。",
+    "source_check": {
+      "status": "renamed",
+      "matches": 1,
+      "locations": [
+        {
+          "id": "ops/payment-retry.md#L3",
+          "path": "ops/payment-retry.md",
+          "start_line": 3,
+          "end_line": 3
+        }
+      ]
+    },
+    "rank": 1,
+    "citation": {
+      "id": "ops/payment-retry.md#L3",
+      "path": "ops/payment-retry.md",
+      "start_line": 3,
+      "end_line": 3
+    }
+  }
+}

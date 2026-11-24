@@ -59,12 +59,15 @@ def passages(text, default_heading):
             lines.append(line)
 
 
-def markdown_files(root):
+def markdown_files(root, *, resolved_only=False):
     # An unreadable subtree must abort the scan, or its files would appear deleted.
     def raise_error(error):
         raise error
 
     for directory, folders, names in os.walk(root, onerror=raise_error, followlinks=False):
+        if resolved_only:
+            base = Path(directory)
+            folders[:] = [name for name in folders if (base / name).resolve(strict=True) == base / name]
         folders.sort()
         for name in sorted(fnmatch.filter(names, "*.md")):
             path = Path(directory) / name
@@ -109,11 +112,49 @@ def current_passages(root, path):
     return "changed", ranges
 
 
-def checked_sources(hits, directory):
+def indexed_digests(db, hits):
+    paths = sorted({hit["path"] for hit in hits})
+    if not paths or not db.execute("SELECT 1 FROM sqlite_schema WHERE name='handbook_sources_v1'").fetchone():
+        return {}
+    placeholders = ",".join("?" for _ in paths)
+    return dict(db.execute(f"SELECT path,digest FROM handbook_sources_v1 WHERE path IN ({placeholders})", paths))
+
+
+def renamed_sources(root, within, digests):
+    scope = root / within if within is not None else root
+    if not scope.is_relative_to(root):
+        return {}
+    try:
+        if scope.resolve(strict=True) != scope or not scope.is_dir():
+            return {}
+    except (FileNotFoundError, NotADirectoryError):
+        return {}
+    except (OSError, RuntimeError):
+        return None
+
+    matches = defaultdict(list)
+    try:
+        for path in markdown_files(scope, resolved_only=True):
+            if path.resolve(strict=True) != path:
+                continue
+            with path.open("rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256").digest()
+            if digest in digests:
+                matches[digest].append(path.relative_to(root).as_posix())
+    except (OSError, RuntimeError):
+        # A partial scan cannot establish that the matching file is unique.
+        return None
+    return {digest: sorted(paths) for digest, paths in matches.items()}
+
+
+def checked_sources(hits, directory, *, source_digests=None, within=None):
     root = directory.resolve(strict=True)
     if not root.is_dir():
         raise ValueError(f"Missing handbook directory: {root}")
     scanned = {}
+    source_digests = source_digests or {}
+    renamed = None
+    rename_scan_done = False
     for hit in hits:
         path = hit["path"]
         if path not in scanned:
@@ -127,29 +168,42 @@ def checked_sources(hits, directory):
             status = "moved"
         elif matches:
             status = "ambiguous"
-        hit["source_check"] = {
+        check = {
             "status": status,
             "locations": [{"id": f"{path}#L{start}", "start_line": start, "end_line": end}
                           for start, end in matches[:50]],
             "matches": len(matches),
         }
+        if status == "missing" and path in source_digests:
+            if not rename_scan_done:
+                renamed = renamed_sources(root, within, set(source_digests.values()))
+                rename_scan_done = True
+            if renamed is None:
+                check["status"] = "unavailable"
+            elif paths := renamed.get(source_digests[path]):
+                start, end = original
+                check = {"status": "renamed" if len(paths) == 1 else "ambiguous", "matches": len(paths),
+                         "locations": [{"id": f"{file}#L{start}", "path": file, "start_line": start, "end_line": end}
+                                       for file in paths[:50]]}
+        hit["source_check"] = check
         yield hit
 
 
-def verify_sources(hits, directory):
-    for _ in checked_sources(hits, directory):
+def verify_sources(hits, directory, *, source_digests=None, within=None):
+    for _ in checked_sources(hits, directory, source_digests=source_digests, within=within):
         pass
     return hits
 
 
-def confirmed_hits(candidates, directory, k, scan_limit):
+def confirmed_hits(candidates, directory, k, scan_limit, *, source_digests=None, within=None):
     hits = []
     seen = set()
     skipped = defaultdict(int)
     scanned = 0
-    for scanned, hit in enumerate(checked_sources(islice(candidates, scan_limit), directory), 1):
+    checked = checked_sources(islice(candidates, scan_limit), directory, source_digests=source_digests, within=within)
+    for scanned, hit in enumerate(checked, 1):
         check = hit["source_check"]
-        if check["status"] not in ("current", "moved"):
+        if check["status"] not in ("current", "moved", "renamed"):
             skipped[check["status"]] += 1
             continue
         citation = check["locations"][0]
@@ -318,6 +372,7 @@ def main():
     query.add_argument("-k", type=int, default=3)
     query.add_argument("--within", help="Restrict retrieval to an indexed file or directory")
     query.add_argument("--verify-sources", type=Path, help="check matched citations against the current Markdown directory")
+    query.add_argument("--follow-renames", action="store_true", help="locate unchanged files by digest when the indexed path is missing")
     query.add_argument("--verified-only", action="store_true", help="return only citations confirmed in the source directory")
     query.add_argument("--scan-limit", type=int, help="verified-only candidate limit, default 100, up to 500")
     evaluation = commands.add_parser("eval")
@@ -331,6 +386,9 @@ def main():
             with closing(sqlite3.connect(args.db, timeout=15)) as db:
                 result = build(db, args.directory, incremental=args.command == "sync")
         else:
+            if args.command == "query" and args.follow_renames and args.verify_sources is None:
+                raise ValueError("--follow-renames requires --verify-sources")
+            digests = None
             glossary = load_glossary(args.glossary) if args.glossary else None
             with closing(sqlite3.connect(args.db.resolve().as_uri() + "?mode=ro", uri=True)) as db:
                 with db:
@@ -350,9 +408,12 @@ def main():
                         if args.scan_limit is not None:
                             raise ValueError("--scan-limit requires --verified-only")
                         result = search(db, args.text, args.k, glossary, within=args.within)
+                    if args.command == "query" and args.follow_renames:
+                        digests = indexed_digests(db, result)
             if args.command == "query" and args.verify_sources is not None:
-                result = (confirmed_hits(result, args.verify_sources, args.k, scan_limit) if args.verified_only
-                          else verify_sources(result, args.verify_sources))
+                options = {"source_digests": digests, "within": args.within}
+                result = (confirmed_hits(result, args.verify_sources, args.k, scan_limit, **options) if args.verified_only
+                          else verify_sources(result, args.verify_sources, **options))
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (OSError, sqlite3.Error, ValueError) as exc:
