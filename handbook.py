@@ -87,6 +87,54 @@ def insert_passages(db, raw, path):
     return first, last
 
 
+def current_passages(root, path):
+    try:
+        validate_scope(path)
+        candidate = root / path
+        if not candidate.is_relative_to(root):
+            return "unavailable", {}
+        resolved = candidate.resolve(strict=True)
+        if candidate != resolved or not resolved.is_relative_to(root) or not resolved.is_file():
+            return "unavailable", {}
+        text = resolved.read_bytes().decode("utf-8-sig")
+    except (FileNotFoundError, NotADirectoryError):
+        return "missing", {}
+    except (OSError, RuntimeError, ValueError):
+        return "unavailable", {}
+
+    ranges = defaultdict(list)
+    for heading, start, end, body in passages(text, resolved.stem):
+        ranges[heading, body].append((start, end))
+    return "changed", ranges
+
+
+def verify_sources(hits, directory):
+    root = directory.resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError(f"Missing handbook directory: {root}")
+    scanned = {}
+    for hit in hits:
+        path = hit["path"]
+        if path not in scanned:
+            scanned[path] = current_passages(root, path)
+        status, passages_by_text = scanned[path]
+        matches = passages_by_text.get((hit["heading"], hit["passage"]), [])
+        original = (hit["start_line"], hit["end_line"])
+        if original in matches:
+            status, matches = "current", [original]
+        elif len(matches) == 1:
+            status = "moved"
+        elif matches:
+            status = "ambiguous"
+        hit["source_check"] = {
+            "status": status,
+            "locations": [{"id": f"{path}#L{start}", "start_line": start, "end_line": end}
+                          for start, end in matches[:50]],
+            "matches": len(matches),
+        }
+    return hits
+
+
 def build(db, root, *, incremental=False):
     if not root.is_dir():
         raise ValueError(f"Missing handbook directory: {root}")
@@ -236,6 +284,7 @@ def main():
     query.add_argument("text")
     query.add_argument("-k", type=int, default=3)
     query.add_argument("--within", help="Restrict retrieval to an indexed file or directory")
+    query.add_argument("--verify-sources", type=Path, help="check matched citations against the current Markdown directory")
     evaluation = commands.add_parser("eval")
     evaluation.add_argument("dataset", type=Path)
     evaluation.add_argument("-k", type=int, default=3)
@@ -253,6 +302,8 @@ def main():
                     db.execute("BEGIN")
                     result = (search(db, args.text, args.k, glossary, within=args.within) if args.command == "query"
                               else evaluate(db, args.dataset, args.k, glossary))
+            if args.command == "query" and args.verify_sources is not None:
+                result = verify_sources(result, args.verify_sources)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (OSError, sqlite3.Error, ValueError) as exc:

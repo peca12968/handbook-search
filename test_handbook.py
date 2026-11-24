@@ -7,7 +7,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from handbook import build, evaluate, load_glossary, passages, search
+from handbook import build, evaluate, load_glossary, passages, search, verify_sources
 
 ROOT = Path(__file__).resolve().parent
 
@@ -56,6 +56,52 @@ class RetrievalTests(unittest.TestCase):
         self.put("new.md", "# Second\nnewterm\n")
         self.assertEqual(build(self.db, self.corpus), {"passages": 1})
         self.assertEqual(search(self.db, "oldterm", 3), [])
+
+    def test_citation_demo_matches_cli_with_an_old_index(self):
+        demo = json.loads((ROOT / "examples" / "citations-demo.json").read_text(encoding="utf-8"))
+        original = (ROOT / "examples" / "handbook" / "checkout.md").read_text(encoding="utf-8")
+        source = self.put("checkout.md", original)
+        build(self.db, self.corpus)
+        # Older indexes have the original passages but no source manifest.
+        self.db.execute("DROP TABLE handbook_sources_v1")
+        self.db.commit()
+        shifted = "# 維運補充\n\n本文在近期更新過。\n\n" + original
+        scenarios = [
+            ("current", original),
+            ("moved", shifted),
+            ("ambiguous", shifted + "\n" + original),
+            ("changed", shifted.replace("沿用原請求鍵", "先查詢既有請求的狀態")),
+            ("missing", None),
+        ]
+        args = [sys.executable, ROOT / "handbook.py", "--db", self.root / "index.db",
+                "query", demo["query"], "-k", "1", "--within", "checkout.md"]
+        for (expected, text), scenario in zip(scenarios, demo["scenarios"], strict=True):
+            with self.subTest(status=expected):
+                if text is None:
+                    source.unlink()
+                else:
+                    source.write_text(text, encoding="utf-8")
+                result = subprocess.run([*args, "--verify-sources", self.corpus],
+                                        capture_output=True, encoding="utf-8", timeout=15)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                hit, = json.loads(result.stdout)
+                self.assertEqual(scenario["status"], expected)
+                self.assertEqual(hit.pop("source_check"), scenario)
+                self.assertEqual(hit, demo["hit"])
+        plain = subprocess.run(args, capture_output=True, encoding="utf-8", timeout=15)
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        self.assertEqual(json.loads(plain.stdout), [demo["hit"]])
+
+    def test_source_verification_marks_bad_text_or_unsafe_paths_unavailable(self):
+        source = self.put("guide.md", "same text")
+        build(self.db, self.corpus)
+        hit = search(self.db, "same", 1)[0]
+        source.write_bytes(b"\xff")
+        outside = self.root / "outside.md"
+        outside.write_text("same text", encoding="utf-8")
+        checks = verify_sources([hit, {**hit, "path": "../outside.md"}], self.corpus)
+        self.assertEqual([row["source_check"] for row in checks],
+                         [{"status": "unavailable", "locations": [], "matches": 0}] * 2)
 
     def test_glossary_matches_whole_words_and_expands_a_literal_phrase_once(self):
         self.put("match.md", "# Deploy\nrelease rollback\n")

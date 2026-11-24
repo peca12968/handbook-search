@@ -27,6 +27,16 @@ python -m unittest -v
 - 中英文字先經 NFKC 正規化與大小寫折疊。英文依詞切分，連續漢字使用相鄰雙字，單字查詢也有對應索引。混合查詢以 OR 召回，再以 BM25 排名，標題與內文的權重為 3 比 1。同分時依檔名與行號排序。
 - 重新建置以一次 SQLite 交易替換索引。檔案移除後重新建置，舊段落會消失。若遇到無法解碼的檔案或空語料，整批回滾。查詢與評估使用唯讀連線。
 
+## 引用前核對目前的 Markdown
+
+```sh
+python handbook.py query "付款重送" -k 1 --within checkout.md --verify-sources examples/handbook
+```
+
+`--verify-sources` 在搜尋結果附加 `source_check`，核對現行檔案的段落標題、內文與起訖行。原行號仍吻合會標記 `current`。相同段落在同一檔案中移到唯一新位置會標記 `moved`，並附上新的行號。原位置失效且有多個相同候選時會標記 `ambiguous`，列出最多 50 個候選與候選總數。
+
+找不到相同段落時會標記 `changed`，找不到原檔會標記 `missing`。無法安全讀取或解碼的檔案會標記 `unavailable`。核對只讀取命中的檔案，每個檔案讀取一次。原索引與排名可以留作稽核，更新索引可另執行 `sync`。[作品站與端對端測試共用的範例](examples/citations-demo.json)
+
 ## 手冊改版後同步索引
 
 對同一份資料庫執行 `python handbook.py sync examples/handbook`，會重新讀取 Markdown 的原始位元組並比對 SHA-256。路徑與內容均相同的文件沿用既有段落及行號；新增或修改的文件才重新切段、斷詞並寫入 FTS5。移除文件時會刪除對應段落。檔案改名會計為一筆移除與一筆新增，查詢結果因此會指到新檔名。掃描仍會讀取所有文件，內容雜湊可辨識大小和修改時間都相同的改動。

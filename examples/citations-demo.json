@@ -1,0 +1,61 @@
+{
+  "query": "付款重送",
+  "hit": {
+    "id": "checkout.md#L7",
+    "path": "checkout.md",
+    "heading": "付款重送",
+    "start_line": 7,
+    "end_line": 7,
+    "passage": "付款請求因逾時重送時，沿用原請求鍵。若建立新鍵，系統會視為另一筆付款。"
+  },
+  "scenarios": [
+    {
+      "status": "current",
+      "locations": [
+        {
+          "id": "checkout.md#L7",
+          "start_line": 7,
+          "end_line": 7
+        }
+      ],
+      "matches": 1
+    },
+    {
+      "status": "moved",
+      "locations": [
+        {
+          "id": "checkout.md#L11",
+          "start_line": 11,
+          "end_line": 11
+        }
+      ],
+      "matches": 1
+    },
+    {
+      "status": "ambiguous",
+      "locations": [
+        {
+          "id": "checkout.md#L11",
+          "start_line": 11,
+          "end_line": 11
+        },
+        {
+          "id": "checkout.md#L22",
+          "start_line": 22,
+          "end_line": 22
+        }
+      ],
+      "matches": 2
+    },
+    {
+      "status": "changed",
+      "locations": [],
+      "matches": 0
+    },
+    {
+      "status": "missing",
+      "locations": [],
+      "matches": 0
+    }
+  ]
+}
