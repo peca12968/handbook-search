@@ -1,0 +1,188 @@
+[
+  {
+    "scenario": "strict",
+    "passed": false,
+    "totals": {
+      "cases": 11,
+      "baseline_reviews": 7,
+      "candidate_reviews": 10,
+      "extra_reviews": 3,
+      "new_misroutes": 0
+    },
+    "candidate": {
+      "assigned": 1,
+      "correct_assignments": 1,
+      "assignment_precision": 1.0
+    },
+    "changes": [
+      {
+        "case_id": "T-026",
+        "expected_queue": "配送",
+        "baseline_queue": "配送",
+        "candidate_queue": null,
+        "baseline_outcome": "correct",
+        "candidate_outcome": "review"
+      },
+      {
+        "case_id": "T-027",
+        "expected_queue": "帳號",
+        "baseline_queue": "帳號",
+        "candidate_queue": null,
+        "baseline_outcome": "correct",
+        "candidate_outcome": "review"
+      },
+      {
+        "case_id": "T-031",
+        "expected_queue": "付款",
+        "baseline_queue": "付款",
+        "candidate_queue": null,
+        "baseline_outcome": "correct",
+        "candidate_outcome": "review"
+      }
+    ],
+    "failed_checks": [
+      {
+        "check": "maximum_extra_reviews",
+        "observed": 3,
+        "limit": 0,
+        "passed": false
+      },
+      {
+        "check": "maximum_extra_reviews_per_queue",
+        "observed": 1,
+        "limit": 0,
+        "passed": false,
+        "queue": "付款"
+      },
+      {
+        "check": "maximum_extra_reviews_per_queue",
+        "observed": 1,
+        "limit": 0,
+        "passed": false,
+        "queue": "帳號"
+      },
+      {
+        "check": "maximum_extra_reviews_per_queue",
+        "observed": 1,
+        "limit": 0,
+        "passed": false,
+        "queue": "配送"
+      }
+    ]
+  },
+  {
+    "scenario": "staffed",
+    "passed": true,
+    "totals": {
+      "cases": 11,
+      "baseline_reviews": 7,
+      "candidate_reviews": 10,
+      "extra_reviews": 3,
+      "new_misroutes": 0
+    },
+    "candidate": {
+      "assigned": 1,
+      "correct_assignments": 1,
+      "assignment_precision": 1.0
+    },
+    "changes": [
+      {
+        "case_id": "T-026",
+        "expected_queue": "配送",
+        "baseline_queue": "配送",
+        "candidate_queue": null,
+        "baseline_outcome": "correct",
+        "candidate_outcome": "review"
+      },
+      {
+        "case_id": "T-027",
+        "expected_queue": "帳號",
+        "baseline_queue": "帳號",
+        "candidate_queue": null,
+        "baseline_outcome": "correct",
+        "candidate_outcome": "review"
+      },
+      {
+        "case_id": "T-031",
+        "expected_queue": "付款",
+        "baseline_queue": "付款",
+        "candidate_queue": null,
+        "baseline_outcome": "correct",
+        "candidate_outcome": "review"
+      }
+    ],
+    "failed_checks": []
+  },
+  {
+    "scenario": "aggressive",
+    "passed": false,
+    "totals": {
+      "cases": 11,
+      "baseline_reviews": 7,
+      "candidate_reviews": 2,
+      "extra_reviews": -5,
+      "new_misroutes": 2
+    },
+    "candidate": {
+      "assigned": 9,
+      "correct_assignments": 7,
+      "assignment_precision": 0.7777777777777778
+    },
+    "changes": [
+      {
+        "case_id": "T-030",
+        "expected_queue": "配送",
+        "baseline_queue": null,
+        "candidate_queue": "配送",
+        "baseline_outcome": "review",
+        "candidate_outcome": "correct"
+      },
+      {
+        "case_id": "T-032",
+        "expected_queue": "帳號",
+        "baseline_queue": null,
+        "candidate_queue": "帳號",
+        "baseline_outcome": "review",
+        "candidate_outcome": "correct"
+      },
+      {
+        "case_id": "T-034",
+        "expected_queue": "配送",
+        "baseline_queue": null,
+        "candidate_queue": "帳號",
+        "baseline_outcome": "review",
+        "candidate_outcome": "misroute"
+      },
+      {
+        "case_id": "T-035",
+        "expected_queue": "帳號",
+        "baseline_queue": null,
+        "candidate_queue": "帳號",
+        "baseline_outcome": "review",
+        "candidate_outcome": "correct"
+      },
+      {
+        "case_id": "T-036",
+        "expected_queue": null,
+        "baseline_queue": null,
+        "candidate_queue": "配送",
+        "baseline_outcome": "review",
+        "candidate_outcome": "misroute"
+      }
+    ],
+    "failed_checks": [
+      {
+        "check": "minimum_precision",
+        "observed": "7/9",
+        "limit": "9/10",
+        "passed": false
+      },
+      {
+        "check": "maximum_new_misroutes",
+        "observed": 2,
+        "limit": 0,
+        "passed": false
+      }
+    ]
+  }
+]

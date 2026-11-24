@@ -22,18 +22,22 @@ def timestamp(value):
 
 
 def read_cases(path):
+    return parse_cases(path.read_text(encoding="utf-8-sig"), path)
+
+
+def parse_cases(text, path):
     cases = {}
-    for number, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
+    for number, line in enumerate(text.splitlines(), 1):
         try:
             row = json.loads(line)
-            case, text, label = row["case_id"], row["text"], row["queue"]
+            case, message, label = row["case_id"], row["text"], row["queue"]
             if not isinstance(case, str) or not case.strip() or case in cases:
                 raise ValueError("expected a unique nonempty case_id")
-            if not isinstance(text, str) or not text.strip():
+            if not isinstance(message, str) or not message.strip():
                 raise ValueError("expected nonempty text")
             if label is not None and (not isinstance(label, str) or not label.strip()):
                 raise ValueError("queue must be a nonempty string or null")
-            cases[case] = (timestamp(row["at"]), text, label)
+            cases[case] = (timestamp(row["at"]), message, label)
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError(f"{path}, line {number}: {error}") from error
     if not cases:
@@ -218,7 +222,11 @@ def fit(train, calibration, target, *, threshold_mode="global", min_cases=1):
 
 
 def load_model(path):
-    model = json.loads(path.read_text(encoding="utf-8"))
+    return parse_model(path.read_text(encoding="utf-8"))
+
+
+def parse_model(text):
+    model = json.loads(text)
     if model["format"] == 1:
         thresholds = [model["margin_threshold"]]
     elif model["format"] == 2:

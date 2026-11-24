@@ -37,6 +37,10 @@ python handbook.py query "付款重送" -k 1 --within checkout.md --verify-sourc
 
 找不到相同段落時會標記 `changed`，找不到原檔會標記 `missing`。無法安全讀取或解碼的檔案會標記 `unavailable`。核對只讀取命中的檔案，每個檔案讀取一次。原索引與排名可以留作稽核，更新索引可另執行 `sync`。[作品站與端對端測試共用的範例](examples/citations-demo.json)
 
+## 工單模型上線前的比較關卡
+
+在同一批獨立評估工單上逐筆比較現行與候選模型，檢查精確率、新增誤派、總覆核量以及各隊列的覆核量。報告列出改變的工單 ID、評估期間與三份輸入的 SHA-256，供 CI 和發布紀錄引用。[重跑步驟](modules/ticket-triage/README.md#在-ci-檢查工單模型是否可替換) · [端對端測試](modules/ticket-triage/test_release_gate.py)
+
 ## 手冊改版後同步索引
 
 對同一份資料庫執行 `python handbook.py sync examples/handbook`，會重新讀取 Markdown 的原始位元組並比對 SHA-256。路徑與內容均相同的文件沿用既有段落及行號；新增或修改的文件才重新切段、斷詞並寫入 FTS5。移除文件時會刪除對應段落。檔案改名會計為一筆移除與一筆新增，查詢結果因此會指到新檔名。掃描仍會讀取所有文件，內容雜湊可辨識大小和修改時間都相同的改動。

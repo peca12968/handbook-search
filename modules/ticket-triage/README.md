@@ -38,6 +38,26 @@ python triage.py evaluate examples/holdout.jsonl --model model.json
 
 三月有 8 件具備明確隊列，4 件獲得正確分派，另外 4 件也被送到人工；其餘 3 件原先就標為需要人工處理。分派精確率的分母是自動分派的 4 件，覆蓋率的分母是全部 11 件。`--min-precision` 約束校正樣本上的表現。這組小型合成資料適合重現流程，實際收件匣的表現仍需另外標註及驗證。[訓練資料](examples/train.jsonl) · [校正資料](examples/calibration.jsonl) · [逐案保留資料](examples/holdout.jsonl)
 
+## 在 CI 檢查工單模型是否可替換
+
+從 `modules/ticket-triage` 訓練現行與候選模型，然後把同一份三月評估集交給 `release_gate.py`。它檢查評估集的時間晚於兩份模型的校正期，並拒絕使用任一模型已見過的案例 ID。
+
+```sh
+python triage.py fit examples/train.jsonl examples/calibration.jsonl --min-calibration-cases 3 --model baseline.json
+python triage.py fit examples/train.jsonl examples/calibration.jsonl --threshold-mode per-queue --min-calibration-cases 3 --model candidate.json
+python release_gate.py baseline.json candidate.json examples/holdout.jsonl --min-cases 11 --min-queue-cases 2 --max-extra-reviews 3 --max-extra-reviews-per-queue 1
+```
+
+關卡要求總案例數、每個隊列的標註數、自動分派件數及精確率達標。預設需要至少一件自動分派且精確率至少 90%，新增誤派或新增覆核的預設上限都是零。`--min-assignments` 可調高自動分派樣本下限。總覆核量與依工單真實標籤分組的覆核量分開檢查。若候選改把工單送往新的錯誤隊列，就算一件新增誤派，即使現行模型原先也派錯。
+
+| 11 件相同評估工單 | 人工覆核 | 新增誤派 | 結果 |
+| --- | ---: | ---: | --- |
+| 逐隊列門檻，維持原覆核上限 | 10 | 0 | 擋下，覆核比原先多 3 件 |
+| 逐隊列門檻，允許全體多 3 件且每隊多 1 件 | 10 | 0 | 通過 |
+| 共用門檻，校正精確率降為 70% | 2 | 2 | 擋下，新增誤派且評估精確率為 7/9 |
+
+結束碼 `0` 代表達標，`1` 代表關卡擋下，`2` 代表輸入或參數無法評估。輸出的 JSON 記錄逐項門檻、改變的派送決策、模型與評估集 SHA-256。報告省略工單原文。`python release_demo.py` 可重現表中三種結果。[CLI](release_gate.py) · [測試](test_release_gate.py) · [展示資料](examples/release-demo.json)
+
 ## 方法與資料規則
 
 ### 逐隊列決定是否啟用自動分派
