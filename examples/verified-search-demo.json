@@ -1,0 +1,130 @@
+{
+  "query": "付款重送",
+  "ordinary": [
+    {
+      "id": "alpha.md#L2",
+      "path": "alpha.md",
+      "heading": "付款重送",
+      "start_line": 2,
+      "end_line": 2,
+      "passage": "逾時後使用相同請求鍵。",
+      "source_check": {
+        "status": "changed",
+        "locations": [],
+        "matches": 0
+      }
+    },
+    {
+      "id": "bravo.md#L2",
+      "path": "bravo.md",
+      "heading": "付款重送",
+      "start_line": 2,
+      "end_line": 2,
+      "passage": "逾時後使用相同請求鍵。",
+      "source_check": {
+        "status": "moved",
+        "locations": [
+          {
+            "id": "bravo.md#L6",
+            "start_line": 6,
+            "end_line": 6
+          }
+        ],
+        "matches": 1
+      }
+    }
+  ],
+  "limited": {
+    "hits": [
+      {
+        "id": "bravo.md#L2",
+        "path": "bravo.md",
+        "heading": "付款重送",
+        "start_line": 2,
+        "end_line": 2,
+        "passage": "逾時後使用相同請求鍵。",
+        "source_check": {
+          "status": "moved",
+          "locations": [
+            {
+              "id": "bravo.md#L6",
+              "start_line": 6,
+              "end_line": 6
+            }
+          ],
+          "matches": 1
+        },
+        "rank": 2,
+        "citation": {
+          "id": "bravo.md#L6",
+          "start_line": 6,
+          "end_line": 6
+        }
+      }
+    ],
+    "scanned": 2,
+    "skipped": {
+      "changed": 1
+    },
+    "stopped": "scan_limit"
+  },
+  "verified": {
+    "hits": [
+      {
+        "id": "bravo.md#L2",
+        "path": "bravo.md",
+        "heading": "付款重送",
+        "start_line": 2,
+        "end_line": 2,
+        "passage": "逾時後使用相同請求鍵。",
+        "source_check": {
+          "status": "moved",
+          "locations": [
+            {
+              "id": "bravo.md#L6",
+              "start_line": 6,
+              "end_line": 6
+            }
+          ],
+          "matches": 1
+        },
+        "rank": 2,
+        "citation": {
+          "id": "bravo.md#L6",
+          "start_line": 6,
+          "end_line": 6
+        }
+      },
+      {
+        "id": "charlie.md#L2",
+        "path": "charlie.md",
+        "heading": "付款重送",
+        "start_line": 2,
+        "end_line": 2,
+        "passage": "逾時後使用相同請求鍵。",
+        "source_check": {
+          "status": "current",
+          "locations": [
+            {
+              "id": "charlie.md#L2",
+              "start_line": 2,
+              "end_line": 2
+            }
+          ],
+          "matches": 1
+        },
+        "rank": 3,
+        "citation": {
+          "id": "charlie.md#L2",
+          "start_line": 2,
+          "end_line": 2
+        }
+      }
+    ],
+    "scanned": 3,
+    "skipped": {
+      "changed": 1
+    },
+    "stopped": "filled"
+  }
+}

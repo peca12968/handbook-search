@@ -8,6 +8,7 @@ from contextlib import closing
 from pathlib import Path
 
 from handbook import build, evaluate, load_glossary, passages, search, verify_sources
+from verified_demo import demo as verified_demo
 
 ROOT = Path(__file__).resolve().parent
 
@@ -102,6 +103,51 @@ class RetrievalTests(unittest.TestCase):
         checks = verify_sources([hit, {**hit, "path": "../outside.md"}], self.corpus)
         self.assertEqual([row["source_check"] for row in checks],
                          [{"status": "unavailable", "locations": [], "matches": 0}] * 2)
+
+    def test_verified_backfill_demo_skips_stale_ranks_and_preserves_actual_citation_lines(self):
+        report = verified_demo()
+        expected = json.loads((ROOT / "examples" / "verified-search-demo.json").read_text(encoding="utf-8"))
+        self.assertEqual(report, expected)
+        self.assertEqual([row["source_check"]["status"] for row in report["ordinary"]], ["changed", "moved"])
+        self.assertEqual(report["limited"]["stopped"], "scan_limit")
+        self.assertEqual(report["verified"]["stopped"], "filled")
+        self.assertEqual(report["verified"]["skipped"], {"changed": 1})
+        self.assertEqual([(row["rank"], row["id"], row["citation"]["id"]) for row in report["verified"]["hits"]],
+                         [(2, "bravo.md#L2", "bravo.md#L6"), (3, "charlie.md#L2", "charlie.md#L2")])
+
+    def test_verified_backfill_deduplicates_moved_anchors_and_preserves_scope(self):
+        document = "# Payment\nmatching request key\n"
+        guide = self.put("guide.md", document + "\nmatching request key\n")
+        self.put("z.md", document)
+        build(self.db, self.corpus)
+        guide.write_text("# Intro\n\nOpening lines\n\n" + document, encoding="utf-8")
+        args = [sys.executable, ROOT / "handbook.py", "--db", self.root / "index.db",
+                "query", "Payment", "-k", "2", "--verify-sources", self.corpus, "--verified-only"]
+
+        def run(*flags):
+            result = subprocess.run([*args, *flags], capture_output=True, encoding="utf-8", timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return json.loads(result.stdout)
+
+        ranked = run()
+        self.assertEqual((ranked["scanned"], ranked["skipped"], ranked["stopped"]), (3, {"duplicate": 1}, "filled"))
+        self.assertEqual([row["citation"]["id"] for row in ranked["hits"]], ["guide.md#L6", "z.md#L2"])
+        scoped = run("--within", "guide.md", "--scan-limit", "2")
+        self.assertEqual(scoped, {"hits": ranked["hits"][:1], "scanned": 2, "skipped": {"duplicate": 1}, "stopped": "exhausted"})
+        self.assertEqual(run("--within", "other.md"), {"hits": [], "scanned": 0, "skipped": {}, "stopped": "exhausted"})
+
+    def test_verified_backfill_requires_source_directory_and_a_valid_limit(self):
+        self.put("guide.md", "# Payment\nmatching request key\n")
+        build(self.db, self.corpus)
+        args = [sys.executable, ROOT / "handbook.py", "--db", self.root / "index.db", "query", "Payment"]
+        for flags in (("--verified-only",), ("--scan-limit", "3"),
+                      ("--verified-only", "--verify-sources", self.corpus, "--scan-limit", "1"),
+                      ("--verified-only", "--verify-sources", self.corpus, "--scan-limit", "501")):
+            with self.subTest(flags=flags):
+                result = subprocess.run([*args, *flags], capture_output=True, encoding="utf-8", timeout=15)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("--", result.stderr)
 
     def test_glossary_matches_whole_words_and_expands_a_literal_phrase_once(self):
         self.put("match.md", "# Deploy\nrelease rollback\n")

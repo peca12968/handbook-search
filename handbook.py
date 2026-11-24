@@ -4,6 +4,7 @@ from collections import defaultdict
 from contextlib import closing
 import fnmatch
 import hashlib
+from itertools import islice
 import json
 import os
 from pathlib import Path
@@ -108,7 +109,7 @@ def current_passages(root, path):
     return "changed", ranges
 
 
-def verify_sources(hits, directory):
+def checked_sources(hits, directory):
     root = directory.resolve(strict=True)
     if not root.is_dir():
         raise ValueError(f"Missing handbook directory: {root}")
@@ -132,7 +133,35 @@ def verify_sources(hits, directory):
                           for start, end in matches[:50]],
             "matches": len(matches),
         }
+        yield hit
+
+
+def verify_sources(hits, directory):
+    for _ in checked_sources(hits, directory):
+        pass
     return hits
+
+
+def confirmed_hits(candidates, directory, k, scan_limit):
+    hits = []
+    seen = set()
+    skipped = defaultdict(int)
+    scanned = 0
+    for scanned, hit in enumerate(checked_sources(islice(candidates, scan_limit), directory), 1):
+        check = hit["source_check"]
+        if check["status"] not in ("current", "moved"):
+            skipped[check["status"]] += 1
+            continue
+        citation = check["locations"][0]
+        if citation["id"] in seen:
+            skipped["duplicate"] += 1
+            continue
+        seen.add(citation["id"])
+        hits.append({**hit, "rank": scanned, "citation": citation})
+        if len(hits) == k:
+            break
+    stopped = "filled" if len(hits) == k else "scan_limit" if len(candidates) > scan_limit else "exhausted"
+    return {"hits": hits, "scanned": scanned, "skipped": dict(sorted(skipped.items())), "stopped": stopped}
 
 
 def build(db, root, *, incremental=False):
@@ -226,6 +255,10 @@ def validate_scope(scope):
 def search(db, query, k, glossary=None, *, within=None):
     if not 1 <= k <= 50:
         raise ValueError("k must be between 1 and 50")
+    return ranked_hits(db, query, k, glossary, within=within)
+
+
+def ranked_hits(db, query, limit, glossary=None, *, within=None):
     words = list(dict.fromkeys(tokens(query)))
     if not 1 <= len(words) <= 64:
         raise ValueError("Expected 1 to 64 distinct search terms")
@@ -240,7 +273,7 @@ def search(db, query, k, glossary=None, *, within=None):
         SELECT path, heading, start_line, end_line, passage FROM handbook_passages
         WHERE handbook_passages MATCH ? {scope_clause}
         ORDER BY bm25(handbook_passages, 3, 1), path, start_line LIMIT ?
-    """, (*bindings, k))
+    """, (*bindings, limit))
     return [{"id": f"{path}#L{start}", "path": path, "heading": heading, "start_line": start,
              "end_line": end, "passage": body} for path, heading, start, end, body in rows]
 
@@ -285,6 +318,8 @@ def main():
     query.add_argument("-k", type=int, default=3)
     query.add_argument("--within", help="Restrict retrieval to an indexed file or directory")
     query.add_argument("--verify-sources", type=Path, help="check matched citations against the current Markdown directory")
+    query.add_argument("--verified-only", action="store_true", help="return only citations confirmed in the source directory")
+    query.add_argument("--scan-limit", type=int, help="verified-only candidate limit, default 100, up to 500")
     evaluation = commands.add_parser("eval")
     evaluation.add_argument("dataset", type=Path)
     evaluation.add_argument("-k", type=int, default=3)
@@ -300,10 +335,24 @@ def main():
             with closing(sqlite3.connect(args.db.resolve().as_uri() + "?mode=ro", uri=True)) as db:
                 with db:
                     db.execute("BEGIN")
-                    result = (search(db, args.text, args.k, glossary, within=args.within) if args.command == "query"
-                              else evaluate(db, args.dataset, args.k, glossary))
+                    if args.command == "eval":
+                        result = evaluate(db, args.dataset, args.k, glossary)
+                    elif args.verified_only:
+                        if args.verify_sources is None:
+                            raise ValueError("--verified-only requires --verify-sources")
+                        if not 1 <= args.k <= 50:
+                            raise ValueError("k must be between 1 and 50")
+                        scan_limit = 100 if args.scan_limit is None else args.scan_limit
+                        if not args.k <= scan_limit <= 500:
+                            raise ValueError("--scan-limit must be between k and 500")
+                        result = ranked_hits(db, args.text, scan_limit + 1, glossary, within=args.within)
+                    else:
+                        if args.scan_limit is not None:
+                            raise ValueError("--scan-limit requires --verified-only")
+                        result = search(db, args.text, args.k, glossary, within=args.within)
             if args.command == "query" and args.verify_sources is not None:
-                result = verify_sources(result, args.verify_sources)
+                result = (confirmed_hits(result, args.verify_sources, args.k, scan_limit) if args.verified_only
+                          else verify_sources(result, args.verify_sources))
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (OSError, sqlite3.Error, ValueError) as exc:

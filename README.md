@@ -37,6 +37,17 @@ python handbook.py query "付款重送" -k 1 --within checkout.md --verify-sourc
 
 找不到相同段落時會標記 `changed`，找不到原檔會標記 `missing`。無法安全讀取或解碼的檔案會標記 `unavailable`。核對只讀取命中的檔案，每個檔案讀取一次。原索引與排名可以留作稽核，更新索引可另執行 `sync`。[作品站與端對端測試共用的範例](examples/citations-demo.json)
 
+### 只取已驗證的引用
+
+```sh
+python handbook.py query "付款重送" -k 2 --verify-sources examples/handbook --verified-only --scan-limit 100
+python verified_demo.py
+```
+
+`--verified-only` 保留原本的 BM25 與 `--within` 範圍，依排名往後補足最多 `k` 筆已核對的引用。每筆保留原索引 `id` 與 `rank`，對外引用可使用 `citation` 的現行行號。不同索引段落若對應同一個現行位置，只列一次。掃描上限預設 100，可設為 `k` 至 500；`scanned` 與 `skipped` 記錄實際掃描及各種略過原因。
+
+範例在建立索引後改寫第 1 名原文，並把第 2 名的段落從第 2 行移到第 6 行。上限為 2 時只返回 1 筆，`stopped` 為 `scan_limit`。掃描到第 3 名可補足 2 筆，`stopped` 為 `filled`。候選用完仍未補足時回報 `exhausted`，沒有可核對的引用時可回傳空清單。[重跑程式](verified_demo.py) · [實際命令輸出](examples/verified-search-demo.json)
+
 ## 工單模型上線前的比較關卡
 
 在同一批獨立評估工單上逐筆比較現行與候選模型，檢查精確率、新增誤派、總覆核量以及各隊列的覆核量。報告列出改變的工單 ID、評估期間與三份輸入的 SHA-256，供 CI 和發布紀錄引用。[重跑步驟](modules/ticket-triage/README.md#在-ci-檢查工單模型是否可替換) · [端對端測試](modules/ticket-triage/test_release_gate.py)
